@@ -5,12 +5,14 @@ from llmgen import (
 )
 
 
+# Describe the Input
 class _JokeRequest(BaseModel):
     """Request for a joke"""
 
     theme: str = Field(description="The theme of the joke")
 
 
+# Describe the Output
 class _JokeResponse(BaseModel):
     """A joke response"""
 
@@ -32,8 +34,10 @@ def main():
         api_key=setting.api_token,
     )
 
+    # Create an API
     api = factory.make_api(_JokeRequest, _JokeResponse)
 
+    # Call the API
     res = api.call(_JokeRequest(theme="cat"))
     print(res.model_dump())
     """

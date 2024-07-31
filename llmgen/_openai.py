@@ -91,7 +91,13 @@ class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
 
     def call(self, input: _BaseModelInputT) -> _BaseModelOutputT:
         """
-        :raises: OpenAiApiError
+        Calls the OpenAI API with the given input and returns the output.
+
+        :param input: The input to be passed to the OpenAI API.
+        :type input: _BaseModelInputT
+        :return: The output returned by the OpenAI API.
+        :rtype: _BaseModelOutputT
+        :raises: OpenAiApiError if there is an error invoking the OpenAI API.
         """
         call_id = uuid.uuid4()
         logger = _logger.getChild(call_id.hex)
@@ -110,7 +116,13 @@ class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
 
     async def async_call(self, input: _BaseModelInputT) -> _BaseModelOutputT:
         """
-        :raises: OpenAiApiError
+        Asynchronously calls the OpenAI API with the given input and returns the output.
+
+        :param input: The input for the API call.
+        :type input: _BaseModelInputT
+        :return: The output of the API call.
+        :rtype: _BaseModelOutputT
+        :raises: OpenAiApiError if there is an error invoking the API.
         """
         call_id = uuid.uuid4()
         logger = _logger.getChild(call_id.hex)
@@ -139,6 +151,17 @@ class OpenAiApiFactory:
         max_tokens: Optional[int] = None,
         intro_prompt: Optional[str] = None,
     ):
+        """
+        Initializes a new instance of the OpenAI class.
+
+        Args:
+            api_key (str): The API key for accessing the OpenAI API.
+            base_url (str, optional): The base URL for the OpenAI API. Defaults to "https://api.openai.com/v1".
+            model_name (str, optional): The name of the language model to use. Defaults to "gpt-4o".
+            temperature (float, optional): The temperature parameter for generating text. Defaults to 0.2.
+            max_tokens (int, optional): The maximum number of tokens to generate. Defaults to None.
+            intro_prompt (str, optional): An introductory prompt to provide context for the generated text. Defaults to None.
+        """
         from pydantic.v1.types import SecretStr
 
         self._llm = ChatOpenAI(
@@ -155,6 +178,16 @@ class OpenAiApiFactory:
         input_type: Type[_BaseModelInputT],
         output_type: Type[_BaseModelOutputT],
     ) -> OpenAiApi[_BaseModelInputT, _BaseModelOutputT]:
+        """
+        Creates an instance of the OpenAiApi class.
+
+        Args:
+            input_type (Type[_BaseModelInputT]): The type of input for the API.
+            output_type (Type[_BaseModelOutputT]): The type of output for the API.
+
+        Returns:
+            OpenAiApi[_BaseModelInputT, _BaseModelOutputT]: An instance of the OpenAiApi class.
+        """
         return OpenAiApi(
             llm=self._llm,
             input_type=input_type,
