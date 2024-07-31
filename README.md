@@ -7,8 +7,11 @@ Effortlessly generate LLM APIs by simply defining input and output schemas (by p
 
 ## Quick Start
 
+Example:
+
 ```
 from pydantic import BaseModel, Field
+from llmgen import OpenAiApiFactory
 
 # describe your input
 class _JokeRequest(BaseModel):
