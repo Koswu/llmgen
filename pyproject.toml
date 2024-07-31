@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "llmgen"
+version = "0.1.0"
+description = "Effortlessly generate LLM APIs by simply defining input and output schemas."
+authors = ["koswu <koswu@outlook.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.8.1"
+pydantic = "^2.8.2"
+langchain = "^0.2.11"
+langchain-openai = "^0.1.19"
+typing-extensions = "^4.12.2"
+
+[tool.poetry.group.dev.dependencies]
+ipython = "^7"
+pydantic-settings = "^2.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
