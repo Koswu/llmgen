@@ -9,7 +9,7 @@ Effortlessly generate LLM APIs by simply defining input and output schemas (by p
 
 Example:
 
-```
+```python
 from pydantic import BaseModel, Field
 from llmgen import OpenAiApiFactory
 
