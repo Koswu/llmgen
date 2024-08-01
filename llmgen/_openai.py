@@ -165,7 +165,7 @@ class OpenAiApiFactory:
         from pydantic.v1.types import SecretStr
 
         self._llm = ChatOpenAI(
-            name=model_name,
+            model=model_name,
             base_url=base_url,
             temperature=temperature,
             max_tokens=max_tokens,
