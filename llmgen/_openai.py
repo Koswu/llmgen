@@ -82,12 +82,16 @@ class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
         input_type: Type[_BaseModelInputT],
         output_type: Type[_BaseModelOutputT],
         intro_prompt: Optional[str] = None,
+        examples: Optional[
+            list[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
+        ] = None,
     ):
         self._llm = llm
         self._input_type = input_type
         self._output_type = output_type
         self._intro_prompt = intro_prompt
         self._output_parser = PydanticOutputParser(pydantic_object=self._output_type)
+        self._examples = examples or []
 
     def call(self, input: _BaseModelInputT) -> _BaseModelOutputT:
         """
@@ -102,7 +106,10 @@ class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
         call_id = uuid.uuid4()
         logger = _logger.getChild(call_id.hex)
         factory = _ApiPromptFactory(
-            input=input, output_type=self._output_type, intro_prompt=self._intro_prompt
+            input=input,
+            output_type=self._output_type,
+            intro_prompt=self._intro_prompt,
+            examples=self._examples,
         )
         messages = factory.get_message()
         logger.debug(f"Invoking llm with messages: {messages}")
@@ -127,7 +134,10 @@ class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
         call_id = uuid.uuid4()
         logger = _logger.getChild(call_id.hex)
         factory = _ApiPromptFactory(
-            input=input, output_type=self._output_type, intro_prompt=self._intro_prompt
+            input=input,
+            output_type=self._output_type,
+            intro_prompt=self._intro_prompt,
+            examples=self._examples,
         )
         messages = factory.get_message()
         logger.debug(f"Invoking llm with messages: {messages}")
@@ -177,6 +187,9 @@ class OpenAiApiFactory:
         self,
         input_type: Type[_BaseModelInputT],
         output_type: Type[_BaseModelOutputT],
+        examples: Optional[
+            List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
+        ] = None,
     ) -> OpenAiApi[_BaseModelInputT, _BaseModelOutputT]:
         """
         Creates an instance of the OpenAiApi class.
@@ -184,6 +197,7 @@ class OpenAiApiFactory:
         Args:
             input_type (Type[_BaseModelInputT]): The type of input for the API.
             output_type (Type[_BaseModelOutputT]): The type of output for the API.
+            examples (Optional[List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]], optional): A list of example input-output pairs. Defaults to None.
 
         Returns:
             OpenAiApi[_BaseModelInputT, _BaseModelOutputT]: An instance of the OpenAiApi class.
@@ -193,4 +207,5 @@ class OpenAiApiFactory:
             input_type=input_type,
             output_type=output_type,
             intro_prompt=self._intro_prompt,
+            examples=examples,
         )
