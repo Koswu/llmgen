@@ -15,7 +15,7 @@ from llmgen import OpenAiApiFactory
 factory = OpenAiApiFactory(
     api_key="your api key here",
 )
-ai_impl = llm.get_func_impl_decorator()
+ai_impl = llm.get_impl_decorator()
 
 @ai_impl
 def make_joke(theme: str) -> str
