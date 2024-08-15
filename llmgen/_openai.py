@@ -294,5 +294,5 @@ class OpenAiApiFactory:
             examples=examples,
         )
 
-    def get_func_impl_decorator(self) -> Callable[[Callable[_P, _T]], LLMImplmentedFunc[_P, _T]]:
+    def get_impl_decorator(self) -> Callable[[Callable[_P, _T]], LLMImplmentedFunc[_P, _T]]:
         return FuncImplDecorator(self)

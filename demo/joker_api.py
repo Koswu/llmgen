@@ -19,7 +19,7 @@ llm = OpenAiApiFactory(
     base_url=str(setting.base_url),
     api_key=setting.api_token,
 )
-ai_impl = llm.get_func_impl_decorator()
+ai_impl = llm.get_impl_decorator()
 
 
 @add_example(args=["dog", 1], result=["Why did the dog sit in the shade? Because he didn't want to be a hot dog!"])
