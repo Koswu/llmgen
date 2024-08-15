@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Generic, List, Optional, Tuple, Type, Union
+from typing import Generic, List, Optional, Type, Union
 import uuid
 from typing_extensions import TypeVar
 from pydantic import BaseModel
@@ -14,7 +14,8 @@ _BaseModelOutputT = TypeVar("_BaseModelOutputT", bound=BaseModel)
 _logger = logging.getLogger(__name__)
 
 
-class OpenAiApiError(Exception): ...
+class OpenAiApiError(Exception):
+    ...
 
 
 def _get_json_schema(model: Union[BaseModel, Type[BaseModel]]) -> str:
@@ -56,7 +57,8 @@ class _ApiPromptFactory(Generic[_BaseModelInputT, _BaseModelOutputT]):
             self._messages.append(SystemMessage(self._intro_prompt))
         self._messages.extend(
             [
-                SystemMessage("I will give you input and you will give me the output."),
+                SystemMessage(
+                    "I will give you input and you will give me the output."),
                 SystemMessage(
                     "Your input Schema will defined by the following JSON Schema:"
                 ),
@@ -83,14 +85,15 @@ class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
         output_type: Type[_BaseModelOutputT],
         intro_prompt: Optional[str] = None,
         examples: Optional[
-            list[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
+            List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
         ] = None,
     ):
         self._llm = llm
         self._input_type = input_type
         self._output_type = output_type
         self._intro_prompt = intro_prompt
-        self._output_parser = PydanticOutputParser(pydantic_object=self._output_type)
+        self._output_parser = PydanticOutputParser(
+            pydantic_object=self._output_type)
         self._examples = examples or []
 
     def call(self, input: _BaseModelInputT) -> _BaseModelOutputT:
