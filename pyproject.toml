@@ -11,6 +11,7 @@ pydantic = "^2.8.2"
 langchain = "^0.2.11"
 langchain-openai = "^0.1.19"
 typing-extensions = "^4.12.2"
+docstring-parser = "^0.16"
 
 [tool.poetry.group.dev.dependencies]
 ipython = "^7"

@@ -162,7 +162,6 @@ class OpenAiApiFactory:
         model_name: str = "gpt-4o",
         temperature: float = 0.2,
         max_tokens: Optional[int] = None,
-        intro_prompt: Optional[str] = None,
     ):
         """
         Initializes a new instance of the OpenAI class.
@@ -184,7 +183,6 @@ class OpenAiApiFactory:
             max_tokens=max_tokens,
             api_key=SecretStr(api_key),
         )
-        self._intro_prompt = intro_prompt
 
     def make_api(
         self,
@@ -193,6 +191,7 @@ class OpenAiApiFactory:
         examples: Optional[
             List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
         ] = None,
+        intro_prompt: Optional[str] = None,
     ) -> OpenAiApi[_BaseModelInputT, _BaseModelOutputT]:
         """
         Creates an instance of the OpenAiApi class.
@@ -209,6 +208,6 @@ class OpenAiApiFactory:
             llm=self._llm,
             input_type=input_type,
             output_type=output_type,
-            intro_prompt=self._intro_prompt,
+            intro_prompt=intro_prompt,
             examples=examples,
         )
