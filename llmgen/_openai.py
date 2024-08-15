@@ -1,12 +1,14 @@
+from __future__ import annotations
 import json
 import logging
-from typing import Generic, List, Optional, Type, Union
+from typing import Any, Awaitable, Callable, Generic, List, Mapping, Optional, Sequence, Type, Union, overload
 import uuid
-from typing_extensions import TypeVar
+from typing_extensions import ParamSpec, TypeVar
 from pydantic import BaseModel
 from langchain_core.messages import BaseMessage, SystemMessage, AIMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_openai import ChatOpenAI
+from llmgen._func_parse import ParsedFunction
 
 _BaseModelInputT = TypeVar("_BaseModelInputT", bound=BaseModel)
 _BaseModelOutputT = TypeVar("_BaseModelOutputT", bound=BaseModel)
@@ -153,6 +155,86 @@ class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
             raise OpenAiApiError(str(e)) from e
 
 
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+class LLMImplmentedFunc(Generic[_P, _T]):
+    def __init__(self, parsed_func: ParsedFunction[_P, _T], api_factory: OpenAiApiFactory):
+        self._parsed_func: ParsedFunction[_P, _T] = parsed_func
+        self._example_pairs: List[ExamplePair] = []
+        self._api_factory = api_factory
+
+    @property
+    def _api(self) -> OpenAiApi:
+        input_model_type = self._parsed_func.input_model_type
+        output_model_type = self._parsed_func.output_model_type
+        return self._api_factory.make_api(
+            input_model_type,
+            output_model_type,
+            self._example_pairs,
+            intro_prompt=f"You will simulate an function. The function name: {self._parsed_func.name}, " +
+            f"The function description: {self._parsed_func.description}"
+        )
+
+    def add_example_pair(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
+        kwargs = kwargs or {}
+        input_model = self._parsed_func.parse_input_param(*args, **kwargs)
+        output_model = self._parsed_func.parse_output(output)
+        self._example_pairs.append(ExamplePair(
+            input=input_model, output=output_model))
+
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        input_model = self._parsed_func.parse_input_param(*args, **kwargs)
+        return self._parsed_func.parse_output_model(self._api.call(input_model))
+
+
+class AsyncLLMImplmentedFunc(Generic[_P, _T]):
+    def __init__(self, parsed_func: ParsedFunction[_P, _T], api_factory: OpenAiApiFactory):
+        self._parsed_func: ParsedFunction[_P, _T] = parsed_func
+        self._example_pairs: List[ExamplePair] = []
+        self._api_factory = api_factory
+
+    @property
+    def _api(self) -> OpenAiApi:
+        input_model_type = self._parsed_func.input_model_type
+        output_model_type = self._parsed_func.output_model_type
+        return self._api_factory.make_api(input_model_type, output_model_type, self._example_pairs,
+                                          intro_prompt=f"You will simulate an function. The function name: {self._parsed_func.name}, " +
+                                          f"The function description: {self._parsed_func.description}"
+                                          )
+
+    def add_example_pair(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
+        kwargs = kwargs or {}
+        input_model = self._parsed_func.parse_input_param(*args, **kwargs)
+        output_model = self._parsed_func.parse_output(output)
+        self._example_pairs.append(ExamplePair(
+            input=input_model, output=output_model))
+
+    async def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        input_model = self._parsed_func.parse_input_param(*args, **kwargs)
+        return self._parsed_func.parse_output_model(await self._api.async_call(input_model))
+
+
+class FuncImplDecorator(Generic[_P, _T]):
+    def __init__(self, api_factory: OpenAiApiFactory):
+        self._api_factory = api_factory
+
+    @overload
+    def __call__(self, func: Callable[_P, _T]) -> LLMImplmentedFunc[_P, _T]:
+        ...
+
+    @overload
+    def __call__(self, func: Callable[_P, Awaitable[_T]]) -> AsyncLLMImplmentedFunc[_P, _T]:
+        ...
+
+    def __call__(self, func):
+        parsed_func = ParsedFunction(func)
+        if parsed_func.is_coroutine:
+            return AsyncLLMImplmentedFunc(parsed_func, self._api_factory)
+        return LLMImplmentedFunc(parsed_func, self._api_factory)
+
+
 class OpenAiApiFactory:
     def __init__(
         self,
@@ -211,3 +293,6 @@ class OpenAiApiFactory:
             intro_prompt=intro_prompt,
             examples=examples,
         )
+
+    def get_func_impl_decorator(self) -> Callable[[Callable[_P, _T]], LLMImplmentedFunc[_P, _T]]:
+        return FuncImplDecorator(self)
