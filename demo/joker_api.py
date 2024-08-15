@@ -22,17 +22,17 @@ llm = OpenAiApiFactory(
 ai_impl = llm.get_func_impl_decorator()
 
 
-@add_example(args=["肥宅", 1], result=["为什么肥宅喜欢宅在家里？因为他们觉得外面的世界太瘦了。"])
+@add_example(args=["dog", 1], result=["Why did the dog sit in the shade? Because he didn't want to be a hot dog!"])
 @ai_impl
 def tell_joke(theme: str, count: int) -> List[str]:
     """
-    根据主题生成多个笑话，返回笑话列表（内容是中文）
+    tell a random joke based on the theme and count
     """
     ...
 
 
 def main():
-    res = tell_joke("琪露诺", 3)
+    res = tell_joke("cat", 3)
     print(res)
 
 
