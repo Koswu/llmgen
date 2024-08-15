@@ -24,7 +24,7 @@ ai_impl = llm.get_func_impl_decorator()
 
 @add_example(args=["dog", 1], result=["Why did the dog sit in the shade? Because he didn't want to be a hot dog!"])
 @ai_impl
-def tell_joke(theme: str, count: int) -> List[str]:
+async def tell_joke(theme: str, count: int) -> List[str]:
     """
     tell a random joke based on the theme and count
     """
