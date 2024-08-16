@@ -33,6 +33,6 @@ def add_example(args: Sequence, result: Any, *, kwargs: Optional[Mapping] = None
     kwargs = kwargs or {}
 
     def wrapper(func: _DecoratedFunc) -> _DecoratedFunc:
-        func.add_example_pair(args, result, kwargs=kwargs)
+        func.add_example(args, result, kwargs=kwargs)
         return func
     return wrapper

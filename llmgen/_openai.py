@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import logging
-from typing import Any, Awaitable, Callable, Generic, List, Mapping, Optional, Sequence, Type, Union, overload
+from typing import Any, Awaitable, Callable, Coroutine, Generic, List, Mapping, Optional, Sequence, Type, Union, overload
 import uuid
 from typing_extensions import ParamSpec, TypeVar
 from pydantic import BaseModel
@@ -177,7 +177,7 @@ class LLMImplmentedFunc(Generic[_P, _T]):
             f"The function description: {self._parsed_func.description}"
         )
 
-    def add_example_pair(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
+    def add_example(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
         kwargs = kwargs or {}
         input_model = self._parsed_func.parse_input_param(*args, **kwargs)
         output_model = self._parsed_func.parse_output(output)
@@ -190,6 +190,7 @@ class LLMImplmentedFunc(Generic[_P, _T]):
 
 
 class AsyncLLMImplmentedFunc(Generic[_P, _T]):
+    # TODO: same as LLMImplmentedFunc, try to refactor
     def __init__(self, parsed_func: ParsedFunction[_P, _T], api_factory: OpenAiApiFactory):
         self._parsed_func: ParsedFunction[_P, _T] = parsed_func
         self._example_pairs: List[ExamplePair] = []
@@ -204,7 +205,7 @@ class AsyncLLMImplmentedFunc(Generic[_P, _T]):
                                           f"The function description: {self._parsed_func.description}"
                                           )
 
-    def add_example_pair(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
+    def add_example(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
         kwargs = kwargs or {}
         input_model = self._parsed_func.parse_input_param(*args, **kwargs)
         output_model = self._parsed_func.parse_output(output)
@@ -216,7 +217,7 @@ class AsyncLLMImplmentedFunc(Generic[_P, _T]):
         return self._parsed_func.parse_output_model(await self._api.async_call(input_model))
 
 
-class FuncImplDecorator(Generic[_P, _T]):
+class FuncImplDecorator:
     def __init__(self, api_factory: OpenAiApiFactory):
         self._api_factory = api_factory
 
@@ -225,7 +226,7 @@ class FuncImplDecorator(Generic[_P, _T]):
         ...
 
     @overload
-    def __call__(self, func: Callable[_P, Awaitable[_T]]) -> AsyncLLMImplmentedFunc[_P, _T]:
+    def __call__(self, func: Callable[_P, Coroutine[Any, Any, _T]]) -> AsyncLLMImplmentedFunc[_P, _T]:
         ...
 
     def __call__(self, func):
@@ -294,5 +295,8 @@ class OpenAiApiFactory:
             examples=examples,
         )
 
-    def get_impl_decorator(self) -> Callable[[Callable[_P, _T]], LLMImplmentedFunc[_P, _T]]:
+    def impl(self) -> FuncImplDecorator:
+        """
+        create a decorator for a function to be implemented by the language model
+        """
         return FuncImplDecorator(self)

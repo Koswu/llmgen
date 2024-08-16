@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List
 from pydantic import HttpUrl
@@ -18,12 +19,12 @@ setting = _MyOpenApiSetting.model_validate({})
 llm = OpenAiApiFactory(
     base_url=str(setting.base_url),
     api_key=setting.api_token,
+    model_name='gpt-4o-mini'
 )
-ai_impl = llm.get_impl_decorator()
 
 
-@add_example(args=["dog", 1], result=["Why did the dog sit in the shade? Because he didn't want to be a hot dog!"])
-@ai_impl
+@add_example(args=["cat", 1], result=["Why was the cat sitting on the computer? Because it wanted to keep an eye on the mouse!"])
+@llm.impl()
 async def tell_joke(theme: str, count: int) -> List[str]:
     """
     tell a random joke based on the theme and count
@@ -31,10 +32,10 @@ async def tell_joke(theme: str, count: int) -> List[str]:
     ...
 
 
-def main():
-    res = tell_joke("cat", 3)
+async def main():
+    res = await tell_joke("cat", 3)
     print(res)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
