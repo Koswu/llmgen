@@ -15,9 +15,8 @@ from llmgen import OpenAiApiFactory
 factory = OpenAiApiFactory(
     api_key="your api key here",
 )
-ai_impl = llm.get_impl_decorator()
 
-@ai_impl
+@llm.impl()
 def make_joke(theme: str) -> str
     """generate a random short joke based on theme""" # just describe your api in docstring
     ...
