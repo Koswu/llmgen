@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "llmgen"
-version = "0.2.0"
+version = "0.5.0"
 description = "Effortlessly generate LLM APIs by simply defining input and output schemas."
 authors = ["koswu <koswu@outlook.com>"]
 license = "MIT"
