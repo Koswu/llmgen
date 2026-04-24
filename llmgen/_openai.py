@@ -1,13 +1,32 @@
 from __future__ import annotations
+
 import json
 import logging
-from typing import Any, Awaitable, Callable, Coroutine, Generic, List, Mapping, Optional, Sequence, Type, Union, overload
-import uuid
-from typing_extensions import ParamSpec, TypeVar
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Coroutine,
+    Generic,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    overload,
+)
+
 from pydantic import BaseModel
-from langchain_core.messages import BaseMessage, SystemMessage, AIMessage
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain_openai import ChatOpenAI
+from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.models import Model
+from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import Usage
+from typing_extensions import ParamSpec, TypeVar
+
 from llmgen._func_parse import ParsedFunction
 
 _BaseModelInputT = TypeVar("_BaseModelInputT", bound=BaseModel)
@@ -20,8 +39,36 @@ class OpenAiApiError(Exception):
     ...
 
 
+# Alias for broader use
+LlmGenError = OpenAiApiError
+
+
 def _get_json_schema(model: Union[BaseModel, Type[BaseModel]]) -> str:
     return json.dumps(model.model_json_schema(), ensure_ascii=False)
+
+
+def _build_system_prompt(
+    input_type: Type[BaseModel],
+    output_type: Type[BaseModel],
+    intro_prompt: Optional[str],
+) -> str:
+    parts = []
+    if intro_prompt:
+        parts.append(intro_prompt)
+    parts.append("I will give you input and you will give me the output.")
+    parts.append(f"Input JSON Schema:\n{_get_json_schema(input_type)}")
+    parts.append(f"Output JSON Schema:\n{_get_json_schema(output_type)}")
+    return "\n\n".join(parts)
+
+
+def _build_message_history(
+    examples: List[ExamplePair],
+) -> List[ModelMessage]:
+    history: List[ModelMessage] = []
+    for ex in examples:
+        history.append(ModelRequest(parts=[UserPromptPart(content=ex.input.model_dump_json())]))
+        history.append(ModelResponse(parts=[TextPart(content=ex.output.model_dump_json())]))
+    return history
 
 
 class ExamplePair(BaseModel, Generic[_BaseModelInputT, _BaseModelOutputT]):
@@ -29,129 +76,102 @@ class ExamplePair(BaseModel, Generic[_BaseModelInputT, _BaseModelOutputT]):
     output: _BaseModelOutputT
 
 
-class _ApiPromptFactory(Generic[_BaseModelInputT, _BaseModelOutputT]):
-    def __init__(
-        self,
-        input: _BaseModelInputT,
-        output_type: Type[_BaseModelOutputT],
-        intro_prompt: Optional[str] = None,
-        examples: Optional[
-            List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
-        ] = None,
-    ):
-        self._messages: List[BaseMessage] = []
-        self._output_type = output_type
-        self._intro_prompt = intro_prompt
-        self._input = input
-        self._examples: List[ExamplePair] = examples or []
-
-    def _add_input_prompt(self, input: _BaseModelInputT):
-        self._messages.extend(
-            [
-                SystemMessage("Your input here:"),
-                SystemMessage(input.model_dump_json()),
-                SystemMessage("Now, please provide the output:"),
-            ]
-        )
-
-    def get_message(self) -> List[BaseMessage]:
-        if self._intro_prompt:
-            self._messages.append(SystemMessage(self._intro_prompt))
-        self._messages.extend(
-            [
-                SystemMessage(
-                    "I will give you input and you will give me the output."),
-                SystemMessage(
-                    "Your input Schema will defined by the following JSON Schema:"
-                ),
-                SystemMessage(content=_get_json_schema(self._input)),
-                SystemMessage(
-                    "Please provide the output in the following JSON Schema:"
-                ),
-                SystemMessage(content=_get_json_schema(self._output_type)),
-            ]
-        )
-        for example in self._examples:
-            self._add_input_prompt(example.input)
-            self._messages.append(AIMessage(example.output.model_dump_json()))
-
-        self._add_input_prompt(self._input)
-        return self._messages
-
-
 class OpenAiApi(Generic[_BaseModelInputT, _BaseModelOutputT]):
     def __init__(
         self,
-        llm: ChatOpenAI,
+        model: Model,
         input_type: Type[_BaseModelInputT],
         output_type: Type[_BaseModelOutputT],
         intro_prompt: Optional[str] = None,
-        examples: Optional[
-            List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
-        ] = None,
+        examples: Optional[List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]] = None,
+        model_settings: Optional[ModelSettings] = None,
     ):
-        self._llm = llm
+        self._model = model
         self._input_type = input_type
         self._output_type = output_type
         self._intro_prompt = intro_prompt
-        self._output_parser = PydanticOutputParser(
-            pydantic_object=self._output_type)
-        self._examples = examples or []
+        self._examples: List[ExamplePair] = examples or []
+        self._model_settings = model_settings
+        system_prompt = _build_system_prompt(input_type, output_type, intro_prompt)
+        self._agent: Agent[None, _BaseModelOutputT] = Agent(
+            model,
+            output_type=output_type,
+            system_prompt=system_prompt,
+            model_settings=model_settings,
+            defer_model_check=True,
+        )
+
+    def _history(self) -> List[ModelMessage]:
+        return _build_message_history(self._examples)
 
     def call(self, input: _BaseModelInputT) -> _BaseModelOutputT:
         """
-        Calls the OpenAI API with the given input and returns the output.
+        Calls the LLM with the given input and returns the structured output.
 
-        :param input: The input to be passed to the OpenAI API.
-        :type input: _BaseModelInputT
-        :return: The output returned by the OpenAI API.
-        :rtype: _BaseModelOutputT
-        :raises: OpenAiApiError if there is an error invoking the OpenAI API.
+        :raises OpenAiApiError: if the LLM call fails.
         """
-        call_id = uuid.uuid4()
-        logger = _logger.getChild(call_id.hex)
-        factory = _ApiPromptFactory(
-            input=input,
-            output_type=self._output_type,
-            intro_prompt=self._intro_prompt,
-            examples=self._examples,
-        )
-        messages = factory.get_message()
-        logger.debug(f"Invoking llm with messages: {messages}")
         try:
-            res = self._llm.invoke(messages)
-            logger.debug(f"llm invoked, response: {res}")
-            return self._output_parser.invoke(res)
+            result = self._agent.run_sync(
+                input.model_dump_json(),
+                message_history=self._history() or None,
+            )
+            return result.output
         except Exception as e:
-            logger.exception("Error invoking llm")
+            _logger.exception("Error invoking llm")
             raise OpenAiApiError(str(e)) from e
 
     async def async_call(self, input: _BaseModelInputT) -> _BaseModelOutputT:
         """
-        Asynchronously calls the OpenAI API with the given input and returns the output.
+        Asynchronously calls the LLM with the given input and returns the structured output.
 
-        :param input: The input for the API call.
-        :type input: _BaseModelInputT
-        :return: The output of the API call.
-        :rtype: _BaseModelOutputT
-        :raises: OpenAiApiError if there is an error invoking the API.
+        :raises OpenAiApiError: if the LLM call fails.
         """
-        call_id = uuid.uuid4()
-        logger = _logger.getChild(call_id.hex)
-        factory = _ApiPromptFactory(
-            input=input,
-            output_type=self._output_type,
-            intro_prompt=self._intro_prompt,
-            examples=self._examples,
-        )
-        messages = factory.get_message()
-        logger.debug(f"Invoking llm with messages: {messages}")
         try:
-            res = await self._llm.ainvoke(messages)
-            logger.debug(f"llm invoked, response: {res}")
-            return await self._output_parser.ainvoke(res)
+            result = await self._agent.run(
+                input.model_dump_json(),
+                message_history=self._history() or None,
+            )
+            return result.output
         except Exception as e:
-            logger.exception("Error invoking llm")
+            _logger.exception("Error invoking llm")
+            raise OpenAiApiError(str(e)) from e
+
+    def call_with_usage(self, input: _BaseModelInputT) -> Tuple[_BaseModelOutputT, Usage]:
+        """Call the LLM and also return token usage information."""
+        try:
+            result = self._agent.run_sync(
+                input.model_dump_json(),
+                message_history=self._history() or None,
+            )
+            return result.output, result.usage()
+        except Exception as e:
+            _logger.exception("Error invoking llm")
+            raise OpenAiApiError(str(e)) from e
+
+    def stream(self, input: _BaseModelInputT) -> Iterator[str]:
+        """Stream text chunks from the LLM (sync generator)."""
+        try:
+            with self._agent.run_stream_sync(
+                input.model_dump_json(),
+                message_history=self._history() or None,
+            ) as stream_result:
+                for chunk in stream_result.stream_text():
+                    yield chunk
+        except Exception as e:
+            _logger.exception("Error streaming llm")
+            raise OpenAiApiError(str(e)) from e
+
+    async def astream(self, input: _BaseModelInputT) -> AsyncIterator[str]:
+        """Stream text chunks from the LLM (async generator)."""
+        try:
+            async with self._agent.run_stream(
+                input.model_dump_json(),
+                message_history=self._history() or None,
+            ) as stream_result:
+                async for chunk in stream_result.stream_text():
+                    yield chunk
+        except Exception as e:
+            _logger.exception("Error streaming llm")
             raise OpenAiApiError(str(e)) from e
 
 
@@ -159,75 +179,63 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
-class LLMImplmentedFunc(Generic[_P, _T]):
-    def __init__(self, parsed_func: ParsedFunction[_P, _T], api_factory: OpenAiApiFactory):
+class _BaseLLMFunc(Generic[_P, _T]):
+    """Shared base for sync and async LLM-implemented functions."""
+
+    def __init__(self, parsed_func: ParsedFunction[_P, _T], api_factory: BaseApiFactory):
         self._parsed_func: ParsedFunction[_P, _T] = parsed_func
         self._example_pairs: List[ExamplePair] = []
         self._api_factory = api_factory
 
     @property
     def _api(self) -> OpenAiApi:
-        input_model_type = self._parsed_func.input_model_type
-        output_model_type = self._parsed_func.output_model_type
         return self._api_factory.make_api(
-            input_model_type,
-            output_model_type,
+            self._parsed_func.input_model_type,
+            self._parsed_func.output_model_type,
             self._example_pairs,
-            intro_prompt=f"You will simulate an function. The function name: {self._parsed_func.name}, " +
-            f"The function description: {self._parsed_func.description}"
+            intro_prompt=(
+                f"You will simulate a function. "
+                f"The function name: {self._parsed_func.name}, "
+                f"The function description: {self._parsed_func.description}"
+            ),
         )
 
-    def add_example(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
+    def add_example(
+        self,
+        args: Sequence[Any],
+        output: _T,
+        *,
+        kwargs: Optional[Mapping[str, Any]] = None,
+    ) -> None:
         kwargs = kwargs or {}
         input_model = self._parsed_func.parse_input_param(*args, **kwargs)
         output_model = self._parsed_func.parse_output(output)
-        self._example_pairs.append(ExamplePair(
-            input=input_model, output=output_model))
+        self._example_pairs.append(ExamplePair(input=input_model, output=output_model))
 
+
+class LLMImplmentedFunc(_BaseLLMFunc[_P, _T]):
     def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         input_model = self._parsed_func.parse_input_param(*args, **kwargs)
         return self._parsed_func.parse_output_model(self._api.call(input_model))
 
 
-class AsyncLLMImplmentedFunc(Generic[_P, _T]):
-    # TODO: same as LLMImplmentedFunc, try to refactor
-    def __init__(self, parsed_func: ParsedFunction[_P, _T], api_factory: OpenAiApiFactory):
-        self._parsed_func: ParsedFunction[_P, _T] = parsed_func
-        self._example_pairs: List[ExamplePair] = []
-        self._api_factory = api_factory
-
-    @property
-    def _api(self) -> OpenAiApi:
-        input_model_type = self._parsed_func.input_model_type
-        output_model_type = self._parsed_func.output_model_type
-        return self._api_factory.make_api(input_model_type, output_model_type, self._example_pairs,
-                                          intro_prompt=f"You will simulate an function. The function name: {self._parsed_func.name}, " +
-                                          f"The function description: {self._parsed_func.description}"
-                                          )
-
-    def add_example(self, args: Sequence[Any], output: _T, *, kwargs: Optional[Mapping[str, Any]] = None):
-        kwargs = kwargs or {}
-        input_model = self._parsed_func.parse_input_param(*args, **kwargs)
-        output_model = self._parsed_func.parse_output(output)
-        self._example_pairs.append(ExamplePair(
-            input=input_model, output=output_model))
-
+class AsyncLLMImplmentedFunc(_BaseLLMFunc[_P, _T]):
     async def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
         input_model = self._parsed_func.parse_input_param(*args, **kwargs)
         return self._parsed_func.parse_output_model(await self._api.async_call(input_model))
 
 
 class FuncImplDecorator:
-    def __init__(self, api_factory: OpenAiApiFactory):
+    def __init__(self, api_factory: BaseApiFactory):
         self._api_factory = api_factory
 
     @overload
-    def __call__(self, func: Callable[_P, _T]) -> LLMImplmentedFunc[_P, _T]:
-        ...
+    def __call__(self, func: Callable[_P, _T]) -> LLMImplmentedFunc[_P, _T]: ...
 
     @overload
-    def __call__(self, func: Callable[_P, Coroutine[Any, Any, _T]]) -> AsyncLLMImplmentedFunc[_P, _T]:
-        ...
+    def __call__(
+        self, func: Callable[_P, Coroutine[Any, Any, _T]]
+    ) -> AsyncLLMImplmentedFunc[_P, _T]: ...
 
     def __call__(self, func):
         parsed_func = ParsedFunction(func)
@@ -236,7 +244,37 @@ class FuncImplDecorator:
         return LLMImplmentedFunc(parsed_func, self._api_factory)
 
 
-class OpenAiApiFactory:
+class BaseApiFactory:
+    """Base factory — subclass to provide a pydantic-ai Model."""
+
+    def _make_model(self) -> Model:
+        raise NotImplementedError
+
+    def _make_model_settings(self) -> Optional[ModelSettings]:
+        return None
+
+    def make_api(
+        self,
+        input_type: Type[_BaseModelInputT],
+        output_type: Type[_BaseModelOutputT],
+        examples: Optional[List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]] = None,
+        intro_prompt: Optional[str] = None,
+    ) -> OpenAiApi[_BaseModelInputT, _BaseModelOutputT]:
+        return OpenAiApi(
+            model=self._make_model(),
+            input_type=input_type,
+            output_type=output_type,
+            intro_prompt=intro_prompt,
+            examples=examples,
+            model_settings=self._make_model_settings(),
+        )
+
+    def impl(self) -> FuncImplDecorator:
+        """Return a decorator that implements a function body using the LLM."""
+        return FuncImplDecorator(self)
+
+
+class OpenAiApiFactory(BaseApiFactory):
     def __init__(
         self,
         api_key: str,
@@ -247,56 +285,74 @@ class OpenAiApiFactory:
         max_tokens: Optional[int] = None,
     ):
         """
-        Initializes a new instance of the OpenAI class.
+        Initializes a new OpenAiApiFactory.
 
         Args:
-            api_key (str): The API key for accessing the OpenAI API.
-            base_url (str, optional): The base URL for the OpenAI API. Defaults to "https://api.openai.com/v1".
-            model_name (str, optional): The name of the language model to use. Defaults to "gpt-4o".
-            temperature (float, optional): The temperature parameter for generating text. Defaults to 0.2.
-            max_tokens (int, optional): The maximum number of tokens to generate. Defaults to None.
-            intro_prompt (str, optional): An introductory prompt to provide context for the generated text. Defaults to None.
+            api_key: The API key for the OpenAI-compatible endpoint.
+            base_url: Base URL of the API (default: OpenAI).
+            model_name: Model to use (default: gpt-4o).
+            temperature: Sampling temperature (default: 0.2).
+            max_tokens: Maximum tokens to generate (default: None).
         """
-        from pydantic.v1.types import SecretStr
+        from pydantic_ai.models.openai import OpenAIModel
+        from pydantic_ai.providers.openai import OpenAIProvider
 
-        self._llm = ChatOpenAI(
-            model=model_name,
-            base_url=base_url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            api_key=SecretStr(api_key),
-        )
+        provider = OpenAIProvider(base_url=base_url, api_key=api_key)
+        self._model = OpenAIModel(model_name, provider=provider)
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+
+    def _make_model(self) -> Model:
+        return self._model
+
+    def _make_model_settings(self) -> Optional[ModelSettings]:
+        settings: dict = {"temperature": self._temperature}
+        if self._max_tokens is not None:
+            settings["max_tokens"] = self._max_tokens
+        return ModelSettings(**settings)  # type: ignore[arg-type]
+
+
+class AgentFactory(BaseApiFactory):
+    """Generic factory that accepts any pydantic-ai model name or Model instance."""
+
+    def __init__(
+        self,
+        model: Union[str, Model],
+        *,
+        temperature: float = 0.2,
+        max_tokens: Optional[int] = None,
+    ):
+        """
+        Args:
+            model: A pydantic-ai model name string (e.g. 'openai:gpt-4o') or a Model instance.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+        """
+        self._model_spec = model
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+
+    def _make_model(self) -> Union[str, Model]:  # type: ignore[override]
+        return self._model_spec
+
+    def _make_model_settings(self) -> Optional[ModelSettings]:
+        settings: dict = {"temperature": self._temperature}
+        if self._max_tokens is not None:
+            settings["max_tokens"] = self._max_tokens
+        return ModelSettings(**settings)  # type: ignore[arg-type]
 
     def make_api(
         self,
         input_type: Type[_BaseModelInputT],
         output_type: Type[_BaseModelOutputT],
-        examples: Optional[
-            List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]
-        ] = None,
+        examples: Optional[List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]] = None,
         intro_prompt: Optional[str] = None,
     ) -> OpenAiApi[_BaseModelInputT, _BaseModelOutputT]:
-        """
-        Creates an instance of the OpenAiApi class.
-
-        Args:
-            input_type (Type[_BaseModelInputT]): The type of input for the API.
-            output_type (Type[_BaseModelOutputT]): The type of output for the API.
-            examples (Optional[List[ExamplePair[_BaseModelInputT, _BaseModelOutputT]]], optional): A list of example input-output pairs. Defaults to None.
-
-        Returns:
-            OpenAiApi[_BaseModelInputT, _BaseModelOutputT]: An instance of the OpenAiApi class.
-        """
         return OpenAiApi(
-            llm=self._llm,
+            model=self._model_spec,  # type: ignore[arg-type]
             input_type=input_type,
             output_type=output_type,
             intro_prompt=intro_prompt,
             examples=examples,
+            model_settings=self._make_model_settings(),
         )
-
-    def impl(self) -> FuncImplDecorator:
-        """
-        create a decorator for a function to be implemented by the language model
-        """
-        return FuncImplDecorator(self)
