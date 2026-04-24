@@ -1,15 +1,16 @@
 
 import asyncio
-from collections import OrderedDict
-from functools import cached_property
 import inspect
 import logging
+from collections import OrderedDict
+from functools import cached_property
 from typing import Any, Callable, Dict, Generic, Type, cast
-from typing_extensions import Annotated
+
 import docstring_parser
 import pydantic
-from pydantic.fields import FieldInfo
 import typing_extensions
+from pydantic.fields import FieldInfo
+from typing_extensions import Annotated
 
 _logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class ParsedFunction(Generic[_P, _T]):
     @cached_property
     def _output_type(self) -> Type[_T]:
         if "return" not in self._type_hints:
-            _logger.info(f"Return type not specified, using str")
+            _logger.info("Return type not specified, using str")
             return cast(Type[_T], str)
         res = self._type_hints["return"]
         if self._docstring.returns and not _has_field_annotation(res):
